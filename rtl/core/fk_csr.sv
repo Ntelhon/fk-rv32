@@ -286,7 +286,9 @@ module fk_csr import fk_pkg::*; #(
       mcycle_q <= '0; minstret_q <= '0;
     end else begin
       mcycle_q <= mcycle_q + 64'd1;
-      if (instret_inc) minstret_q <= minstret_q + 64'd1;
+      // an instruction that writes minstret/minstreth suppresses its own increment
+      if (instret_inc && !(do_write && (csr_addr == 12'hB02 || csr_addr == 12'hB82)))
+        minstret_q <= minstret_q + 64'd1;
 
       if (trap_valid) begin
         if (trap_to_s) begin

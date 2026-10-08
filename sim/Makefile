@@ -1,14 +1,25 @@
 # fk-core Verilator build
-#   make            build obj_dir/Vfk_soc
-#   make test       run the riscv-tests suite
-#   make lint       lint only
+#   make                build obj_dir/Vfk_soc
+#   make riscv-tests    fetch and build the rv32 riscv-tests ISA suite
+#   make test           run the riscv-tests suite (builds it first if needed)
+#   make lint           lint only
+#
+# Tools are taken from PATH; override with e.g. VERILATOR=/opt/verilator/bin/verilator
+# or RISCV_PREFIX=/opt/riscv/bin/riscv64-unknown-elf-
 
-CHIPYARD_ENV ?= /home/fkarabulut/Desktop/Rigoletto/chipyard/.conda-env
-VERILATOR    ?= $(CHIPYARD_ENV)/bin/verilator
-RISCV        ?= $(CHIPYARD_ENV)/riscv-tools
-export PATH  := $(CHIPYARD_ENV)/bin:$(PATH)
+VERILATOR    ?= verilator
+RISCV_PREFIX ?= riscv64-unknown-elf-
 
-RTL_DIR := ../rtl
+ROOT      := $(abspath ..)
+BUILD_DIR := $(ROOT)/build
+
+RISCV_TESTS_URL ?= https://github.com/riscv-software-src/riscv-tests.git
+RISCV_TESTS_REF ?= 87b04f07a51f57b134a935c6157222bbd35905d9
+RISCV_TESTS_SRC := $(BUILD_DIR)/riscv-tests
+# Directory holding the built rv32* test ELFs; point it at a prebuilt suite to skip building
+RISCV_TESTS_DIR ?= $(RISCV_TESTS_SRC)/isa
+
+RTL_DIR := $(ROOT)/rtl
 SRCS := $(RTL_DIR)/core/fk_pkg.sv \
         $(RTL_DIR)/core/fk_decode.sv \
         $(RTL_DIR)/core/fk_alu.sv \
@@ -38,10 +49,25 @@ obj_dir/Vfk_soc: $(SRCS) tb.cpp
 lint:
 	$(VERILATOR) --lint-only -Wall --top-module fk_soc $(SRCS)
 
-test: obj_dir/Vfk_soc
-	./run_tests.sh
+$(RISCV_TESTS_SRC):
+	$(ROOT)/scripts/fetch-src.sh $(RISCV_TESTS_URL) $(RISCV_TESTS_REF) $@
+
+$(RISCV_TESTS_SRC)/isa/rv32ui-p-add: | $(RISCV_TESTS_SRC)
+	$(MAKE) -C $(RISCV_TESTS_SRC)/isa XLEN=32 RISCV_PREFIX=$(RISCV_PREFIX) \
+	  rv32ui rv32um rv32ua rv32mi rv32si
+
+riscv-tests: $(RISCV_TESTS_SRC)/isa/rv32ui-p-add
+
+# Only build the suite when using the default location
+TEST_DEPS := obj_dir/Vfk_soc
+ifeq ($(RISCV_TESTS_DIR),$(RISCV_TESTS_SRC)/isa)
+TEST_DEPS += riscv-tests
+endif
+
+test: $(TEST_DEPS)
+	RISCV_TESTS_DIR=$(RISCV_TESTS_DIR) ./run_tests.sh
 
 clean:
 	rm -rf obj_dir
 
-.PHONY: lint test clean
+.PHONY: lint riscv-tests test clean

@@ -43,19 +43,41 @@ suite and boots Linux 6.6 (OpenSBI → kernel → userspace) in Verilator.
 
 ## Usage
 
-Tools come from a Chipyard conda env (Verilator 5.x, riscv64 elf/linux gcc, dtc). Point the Makefiles at
-yours with `CHIPYARD_ENV=/path/to/chipyard/.conda-env`; `sw/Makefile` also takes `FIREMARSHAL=` for the
-Linux and OpenSBI sources (or edit the defaults).
+### Prerequisites (all found through `PATH`)
+
+| Tool | Used for |
+|------|----------|
+| Verilator ≥ 5.0, a C++ compiler, make | the simulator |
+| `riscv64-unknown-elf-gcc` | riscv-tests and `/init` (bare-metal; rv32 is built with `-march/-mabi`) |
+| `riscv64-unknown-linux-gnu-gcc` | Linux kernel and OpenSBI (OpenSBI needs a PIE-capable linker) |
+| `dtc`, git, and the usual kernel host tools (flex, bison, bc, …) | DTB, fetching sources, kernel build |
+
+Any RISC-V GNU toolchain works; rv32 multilibs are not needed (everything rv32 is built `-nostdlib`). If your tools
+use other names or locations, override them: `VERILATOR=`, `RISCV_PREFIX=` (sim),
+`ELF_PREFIX=`, `LINUX_PREFIX=`, `OPENSBI_PREFIX=`, `DTC=` (sw).
+
+### Build and run
 
 ```sh
 cd sim
 make                 # build obj_dir/Vfk_soc
-make test            # riscv-tests: rv32{ui,um,ua,mi,si}-p-*, rv32{ui,um,ua}-v-*  -> 134/134 pass
+make test            # fetch + build riscv-tests (pinned), run rv32{ui,um,ua,mi,si}-p-*, rv32{ui,um,ua}-v-*
 
 cd ../sw
-make                 # OpenSBI fw_jump (rv32), Linux 6.6 tinyconfig + initramfs, DTB
-make run             # boot Linux (~66M cycles, ~40 s)
+make                 # fetch OpenSBI v1.5.1 + Linux v6.6, build fw_jump.bin, Image (with initramfs), DTB
+make run             # boot Linux (~71M cycles, ~45 s)
 ```
+
+Everything that is fetched or generated goes into the top-level `build/` directory (ignored by git).
+Sources are shallow-fetched at pinned versions by `scripts/fetch-src.sh`. To reuse what you already
+have, point at it instead:
+
+- `RISCV_TESTS_DIR=/path/to/riscv-tests/isa make test`: a prebuilt rv32 suite.
+- `OPENSBI_SRC=/path/to/opensbi LINUX_SRC=/path/to/linux make`: existing source trees. The Linux tree
+  must be clean, because it's built out of tree with `O=`.
+
+The test runner skips `rv32ui-p-ma_data` (needs hardware misaligned access) and `rv32mi-p-pmpaddr`
+(needs at least one PMP entry). Everything else passes.
 
 Simulator options: `--max-cycles N`, `--load FILE@ADDR`, `--dtb FILE@ADDR`, `--entry ADDR`,
 `--no-tohost`, `+trace_commit` (prints every committed instruction and trap).
