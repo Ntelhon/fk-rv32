@@ -1,0 +1,4 @@
+sim/obj_dir/
+sw/build/
+sw/out/
+*.log
