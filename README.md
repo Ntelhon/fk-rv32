@@ -171,3 +171,8 @@ to the UART receiver; when stdin is a terminal it's put in raw mode and Ctrl-A x
   Linux boot. A store buffer and a write-back D$ are the biggest performance wins.
 - Single hart, no ASIDs, no PMP entries, no hardware misaligned access, no Sstc.
 - No networking or block devices in the kernel config; the root filesystem lives in RAM.
+
+## License
+
+MIT, see [LICENSE](LICENSE). This covers the files in this repository only; the sources fetched into
+`build/` (Linux, OpenSBI, Buildroot, riscv-tests) keep their own licenses.
