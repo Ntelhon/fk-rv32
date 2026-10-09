@@ -1,0 +1,29 @@
+# fk-rv32 Buildroot config: rv32ima/ilp32 musl toolchain + busybox initramfs.
+# The kernel and OpenSBI are built separately by sw/Makefile.
+BR2_riscv=y
+BR2_RISCV_32=y
+BR2_riscv_custom=y
+BR2_RISCV_ISA_RVM=y
+BR2_RISCV_ISA_RVA=y
+# BR2_RISCV_ISA_RVF is not set
+# BR2_RISCV_ISA_RVD is not set
+# BR2_RISCV_ISA_RVC is not set
+BR2_RISCV_ABI_ILP32=y
+
+# ftp.gnu.org is often slow/unreachable; the generic mirror redirector is not
+BR2_GNU_MIRROR="https://ftpmirror.gnu.org/gnu"
+
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_KERNEL_HEADERS_6_6=y
+
+BR2_TARGET_GENERIC_HOSTNAME="fk-rv32"
+BR2_TARGET_GENERIC_ISSUE="Welcome to fk-rv32 (RV32IMA, Sv32) - log in as root, no password"
+BR2_TARGET_GENERIC_GETTY_PORT="console"
+BR2_SYSTEM_DHCP=""
+
+BR2_TARGET_ROOTFS_CPIO=y
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# FK_RV32_SW is passed on the make command line by sw/Makefile
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(FK_RV32_SW)/buildroot/post-build.sh"
+# BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set

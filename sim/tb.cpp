@@ -8,7 +8,11 @@
 //     --no-tohost          ignore the ELF's tohost symbol
 //     +trace_commit        print every committed instruction / trap
 //
-// Exit status: 0 on tohost == 1 (pass), 1 on test failure / timeout.
+// UART: output goes to stdout, stdin feeds the UART receiver. When stdin is a
+// terminal it is switched to raw mode (keys go straight to the guest, Ctrl-C
+// included); press Ctrl-A x to quit, Ctrl-A Ctrl-A to send a literal Ctrl-A.
+//
+// Exit status: 0 on tohost == 1 (pass) or Ctrl-A x, 1 on test failure / timeout.
 
 #include "Vfk_soc.h"
 #include "Vfk_soc__Dpi.h"
@@ -23,13 +27,50 @@
 #include <elf.h>
 #include <fcntl.h>
 #include <string>
+#include <csignal>
 #include <sys/select.h>
+#include <termios.h>
 #include <unistd.h>
 #include <vector>
 
 static bool     g_done      = false;
 static uint32_t g_tohost    = 0;
 static bool     g_stdin_ok  = true;
+static bool     g_quit      = false;   // Ctrl-A x
+static bool     g_raw       = false;   // stdin terminal switched to raw mode
+static bool     g_escape    = false;   // Ctrl-A seen
+static struct termios g_saved_tio;
+
+static void term_restore() {
+  if (g_raw) {
+    tcsetattr(0, TCSANOW, &g_saved_tio);
+    g_raw = false;
+  }
+}
+
+static void term_signal(int sig) {
+  term_restore();
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+// Put an interactive stdin into raw mode so every key reaches the guest UART.
+static void term_setup() {
+  if (!isatty(0) || tcgetattr(0, &g_saved_tio) != 0) return;
+  struct termios raw = g_saved_tio;
+  raw.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+  raw.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+  raw.c_cflag |= CS8;
+  raw.c_cc[VMIN]  = 1;
+  raw.c_cc[VTIME] = 0;
+  if (tcsetattr(0, TCSANOW, &raw) != 0) return;
+  g_raw = true;
+  atexit(term_restore);
+  signal(SIGTERM, term_signal);
+  signal(SIGHUP, term_signal);
+  signal(SIGQUIT, term_signal);
+  fprintf(stderr, "[sim] interactive console: press Ctrl-A x to quit\r\n");
+}
 
 extern "C" void sim_tohost(unsigned int value) {
   g_done   = true;
@@ -51,6 +92,15 @@ extern "C" int uart_rx() {
   unsigned char c;
   ssize_t n = read(0, &c, 1);
   if (n <= 0) { g_stdin_ok = false; return -1; }
+  if (g_raw) {
+    if (g_escape) {
+      g_escape = false;
+      if (c == 'x' || c == 'X') { g_quit = true; return -1; }
+      if (c == 0x01) return 0x01;
+      return c;                    // unknown escape: pass the key through
+    }
+    if (c == 0x01) { g_escape = true; return -1; }
+  }
   return c;
 }
 
@@ -184,14 +234,21 @@ int main(int argc, char** argv) {
     top->clk = 0; top->eval();
   }
   top->rst_n = 1;
+  term_setup();
 
-  while (!ctx->gotFinish() && !g_done && (max_cycles == 0 || cycle < max_cycles)) {
+  while (!ctx->gotFinish() && !g_done && !g_quit && (max_cycles == 0 || cycle < max_cycles)) {
     top->clk = 1; top->eval();
     top->clk = 0; top->eval();
     cycle++;
   }
 
   top->final();
+  term_restore();
+
+  if (g_quit) {
+    fprintf(stderr, "\n[sim] quit by user after %lu cycles\n", (unsigned long)cycle);
+    return 0;
+  }
 
   if (g_done) {
     if (g_tohost == 1) {

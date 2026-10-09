@@ -26,7 +26,7 @@ PASS (70961074 cycles)
 | `rtl/core/` | the core: pipeline (`fk_core.sv`), decoder, ALU, divider, CSRs, TLB, page-table walker, I$/D$, AXI arbiter |
 | `rtl/soc/`  | simulation SoC: AXI→register bridge, boot ROM/RAM, CLINT, PLIC, 16550 UART, test finisher (`fk_soc.sv`) |
 | `sim/`      | Verilator testbench (`tb.cpp`), Makefile, riscv-tests runner |
-| `sw/`       | device tree, Linux config fragment, freestanding `/init`, Makefile for OpenSBI + Linux |
+| `sw/`       | device tree, Linux config fragment, freestanding `/init`, bare-metal `hello/`, Buildroot config (`buildroot/`), Makefile |
 | `scripts/`  | `check-deps.sh` (requirements check), `fetch-src.sh` (pinned source fetch) |
 | `build/`    | everything fetched or generated (created on demand, git-ignored) |
 
@@ -80,6 +80,7 @@ All tools are found through `PATH`. Run `scripts/check-deps.sh` to check them.
 | `riscv64-unknown-linux-gnu-gcc` | Linux kernel, OpenSBI | GCC 13.2, binutils 2.42 |
 | `dtc` | device tree | 1.7.2 |
 | git, flex, bison, bc, perl | fetching sources, kernel build | |
+| Buildroot host tools: wget, rsync, cpio, unzip, file, patch, python3, a host gcc/g++ | `make shell` only (Buildroot builds its own rv32 toolchain) | Ubuntu 24.04, gcc 13.3 |
 
 Notes:
 - `make test` only needs the simulator tools, the bare-metal gcc and git. The Linux toolchain, `dtc`
@@ -103,7 +104,9 @@ make test            # fetch + build riscv-tests (pinned), run them: 139/139 pas
 
 cd ../sw
 make                 # fetch OpenSBI v1.5.1 + Linux v6.6, build fw_jump.bin, Image (with initramfs), DTB
-make run             # boot Linux (~71M cycles, ~45 s); exits when Linux powers off
+make run             # boot Linux (~75M cycles, ~50 s); exits when Linux powers off
+make run-hello       # bare-metal hello world (no OpenSBI/Linux, 593 cycles)
+make shell           # interactive Linux login on the console (~2.5 min to the prompt, see below)
 ```
 
 Everything that is fetched or generated goes into the top-level `build/` directory (ignored by git).
@@ -116,6 +119,34 @@ have, point at it instead:
 
 The test runner skips `rv32ui-p-ma_data` (needs hardware misaligned access) and `rv32mi-p-pmpaddr`
 (needs at least one PMP entry). Everything else passes.
+
+### Interactive Linux shell
+
+`make shell` boots the same kernel with a Buildroot root filesystem (busybox + musl) as an initrd
+and gives you a login prompt on the simulated UART, in your terminal:
+
+```
+Welcome to fk-rv32 (RV32IMA, Sv32) - log in as root, no password
+fk-rv32 login: root
+# uname -a
+Linux fk-rv32 6.6.0+ #1 Thu Oct  8 16:30:35 +03 2026 riscv32 GNU/Linux
+# cat /proc/cpuinfo
+processor	: 0
+hart		: 0
+isa		: rv32ima_zicntr_zicsr_zifencei
+mmu		: sv32
+```
+
+- Log in as `root` with no password. Busybox provides the usual commands (`ls`, `cat`, `ps`, `top`,
+  `vi`, `free`, `dmesg`, …).
+- Press **Ctrl-A x** to quit the simulator. Ctrl-C goes to Linux; Ctrl-A Ctrl-A sends a literal Ctrl-A.
+- The first `make shell` fetches Buildroot and builds an rv32ima/ilp32 musl toolchain and the rootfs
+  (about 15 min on a 40-core machine, longer on smaller ones; about 6 GB in `build/`). Later runs reuse
+  it. `make rootfs` builds it without booting.
+- It's an RTL simulation running at about 1.6M cycles per second, so it takes about 2.5 minutes to reach the login
+  prompt, and each command takes a few seconds.
+- Buildroot is configured by `sw/buildroot/fk_rv32_defconfig`. If another toolchain in your `PATH`
+  confuses Buildroot's host build, run `make shell BR_PATH=/usr/bin:/bin`.
 
 Simulator (`sim/obj_dir/Vfk_soc [options] [program.elf]`) options:
 
@@ -130,7 +161,7 @@ Simulator (`sim/obj_dir/Vfk_soc [options] [program.elf]`) options:
 
 The simulator exits 0 on pass (`tohost` = 1 or a power-off write) and 1 on failure or timeout. It
 prints cycles, instructions retired and IPC at the end. UART output goes to stdout, and stdin is fed
-to the UART receiver.
+to the UART receiver; when stdin is a terminal it's put in raw mode and Ctrl-A x quits.
 
 ## Known limitations / next steps
 
@@ -139,5 +170,4 @@ to the UART receiver.
 - Stores are blocking write-through (each one waits for the AXI B response). IPC is about 0.47 on the
   Linux boot. A store buffer and a write-back D$ are the biggest performance wins.
 - Single hart, no ASIDs, no PMP entries, no hardware misaligned access, no Sstc.
-- `/init` is a freestanding program that uses raw syscalls, so no rv32 libc is needed. A busybox
-  userspace would need an rv32 glibc or musl toolchain.
+- No networking or block devices in the kernel config; the root filesystem lives in RAM.

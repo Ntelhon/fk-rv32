@@ -36,6 +36,9 @@ check "flex"                      flex
 check "bison"                     bison
 check "bc"                        bc
 check "perl"                      perl
+echo "Buildroot (make shell only):"
+for t in wget rsync cpio file patch python3; do check "$t" "$t"; done
+check "unzip"                     unzip -v
 
 # Recent OpenSBI (v1.5) must be linked as a PIE
 if command -v "${OPENSBI_PREFIX}gcc" >/dev/null 2>&1; then
