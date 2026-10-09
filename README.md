@@ -110,6 +110,10 @@ make shell           # interactive Linux login on the console (~2.5 min to the p
 ```
 
 Everything that is fetched or generated goes into the top-level `build/` directory (ignored by git).
+To free disk space afterwards, run `make prune` in `sw/` and in `sim/`. That removes the source trees and
+build intermediates (several GB after `make shell`) but keeps the images and the simulator binary,
+so `make run`, `make shell` and `make test` still start immediately. Changing the kernel or Buildroot
+config later refetches and rebuilds from scratch.
 Sources are shallow-fetched at pinned versions by `scripts/fetch-src.sh`. To reuse what you already
 have, point at it instead:
 

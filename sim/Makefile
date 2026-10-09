@@ -70,4 +70,10 @@ test: $(TEST_DEPS)
 clean:
 	rm -rf obj_dir
 
-.PHONY: lint riscv-tests test clean
+# Free disk space: keep only the simulator binary (it stays up to date until
+# the RTL or tb.cpp change, which triggers a full Verilator rebuild anyway)
+prune:
+	if [ -d obj_dir ]; then cd obj_dir && ls -A | grep -vx Vfk_soc | xargs -r rm -rf; fi
+	@du -sh obj_dir
+
+.PHONY: lint riscv-tests test clean prune

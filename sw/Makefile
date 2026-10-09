@@ -51,15 +51,13 @@ all: $(OUT)/fw_jump.bin $(OUT)/Image $(OUT)/fk-soc.dtb
 $(OUT) $(LINUX_OUT):
 	mkdir -p $@
 
-# --- sources (fetched only when not overridden and not yet present) ---
-$(BUILD)/opensbi:
-	$(FETCH) $(OPENSBI_URL) $(OPENSBI_REF) $@
-
-$(BUILD)/linux:
-	$(FETCH) $(LINUX_URL) $(LINUX_REF) $@
-
-$(BUILD)/buildroot:
-	$(FETCH) $(BUILDROOT_URL) $(BUILDROOT_REF) $@
+# --- sources ---
+# Fetched inside the recipes that need them (not as make prerequisites), so a
+# source tree removed by 'make prune' does not force up-to-date outputs to rebuild.
+ensure_src = test -d $(1) || $(FETCH) $(2) $(3) $(1)
+ENSURE_OPENSBI   := $(call ensure_src,$(OPENSBI_SRC),$(OPENSBI_URL),$(OPENSBI_REF))
+ENSURE_LINUX     := $(call ensure_src,$(LINUX_SRC),$(LINUX_URL),$(LINUX_REF))
+ENSURE_BUILDROOT := $(call ensure_src,$(BUILDROOT_SRC),$(BUILDROOT_URL),$(BUILDROOT_REF))
 
 # --- device tree ---
 $(OUT)/fk-soc.dtb: fk-soc.dts | $(OUT)
@@ -67,7 +65,8 @@ $(OUT)/fk-soc.dtb: fk-soc.dts | $(OUT)
 
 # --- OpenSBI ---
 # fw_jump.bin is loaded raw at 0x80000000 (recent OpenSBI builds are PIEs linked at 0)
-$(OUT)/fw_jump.bin: | $(OPENSBI_SRC) $(OUT)
+$(OUT)/fw_jump.bin: | $(OUT)
+	$(ENSURE_OPENSBI)
 	$(MAKE) -C $(OPENSBI_SRC) -j$(J) O=$(OPENSBI_OUT) PLATFORM=generic \
 	  PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei PLATFORM_RISCV_ABI=ilp32 \
 	  CROSS_COMPILE=$(OPENSBI_PREFIX) FW_PAYLOAD=n FW_DYNAMIC=n
@@ -98,10 +97,12 @@ run-hello: $(OUT)/hello.elf
 BR_MAKE := env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL PATH="$(BR_PATH)" \
            make -C $(BUILDROOT_SRC) O=$(BUILDROOT_OUT) FK_RV32_SW=$(abspath .)
 
-$(BUILDROOT_OUT)/.config: buildroot/fk_rv32_defconfig | $(BUILDROOT_SRC)
+$(BUILDROOT_OUT)/.config: buildroot/fk_rv32_defconfig
+	$(ENSURE_BUILDROOT)
 	$(BR_MAKE) BR2_DEFCONFIG=$(abspath buildroot/fk_rv32_defconfig) defconfig
 
 $(OUT)/rootfs.cpio: $(BUILDROOT_OUT)/.config buildroot/post-build.sh | $(OUT)
+	$(ENSURE_BUILDROOT)
 	$(BR_MAKE)
 	cp $(BUILDROOT_OUT)/images/rootfs.cpio $@
 
@@ -116,7 +117,8 @@ $(OUT)/fk-soc-shell.dtb: fk-soc.dts $(OUT)/rootfs.cpio
 	  fk-soc.dts | $(DTC) -I dts -O dtb -o $@ -
 
 # --- Linux ---
-$(LINUX_OUT)/.config: linux.config | $(LINUX_SRC) $(LINUX_OUT)
+$(LINUX_OUT)/.config: linux.config | $(LINUX_OUT)
+	$(ENSURE_LINUX)
 	$(KMAKE) tinyconfig
 	cd $(LINUX_SRC) && ARCH=riscv CROSS_COMPILE=$(LINUX_PREFIX) \
 	  scripts/kconfig/merge_config.sh -m -O $(LINUX_OUT) $(LINUX_OUT)/.config $(abspath linux.config)
@@ -128,6 +130,7 @@ $(LINUX_OUT)/initramfs.list: $(OUT)/init | $(LINUX_OUT)
 	  $(OUT)/init > $@
 
 $(OUT)/Image: $(LINUX_OUT)/.config $(LINUX_OUT)/initramfs.list
+	$(ENSURE_LINUX)
 	$(KMAKE) -j$(J) Image
 	cp $(LINUX_OUT)/arch/riscv/boot/Image $@
 
@@ -139,4 +142,16 @@ run: all
 clean:
 	rm -rf $(OUT) $(LINUX_OUT) $(OPENSBI_OUT)
 
-.PHONY: all run hello run-hello rootfs shell clean
+# Free disk space but keep everything needed to run: removes the fetched source
+# trees (only the default ones in ../build) and build intermediates, keeping the
+# images in $(OUT) and the config files that mark them up to date. A later change
+# to linux.config or the Buildroot defconfig refetches and rebuilds from scratch.
+prune:
+	rm -rf $(BUILD)/linux $(BUILD)/opensbi $(BUILD)/buildroot $(OPENSBI_OUT) $(BUILD)/*.log
+	if [ -d $(LINUX_OUT) ]; then cd $(LINUX_OUT) && \
+	  ls -A | grep -vxE '\.config|initramfs\.list' | xargs -r rm -rf; fi
+	if [ -d $(BUILDROOT_OUT) ]; then cd $(BUILDROOT_OUT) && \
+	  ls -A | grep -vx '\.config' | xargs -r rm -rf; fi
+	@du -sh $(BUILD)
+
+.PHONY: all run hello run-hello rootfs shell clean prune
